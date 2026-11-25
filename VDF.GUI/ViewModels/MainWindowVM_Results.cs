@@ -188,6 +188,11 @@ namespace VDF.GUI.ViewModels {
 			RebuildResultsList();
 		});
 
+		internal void EnsureGroupExpanded(Guid groupId) {
+			if (collapsedResultsGroups.Remove(groupId))
+				RebuildResultsList();
+		}
+
 		/// <summary>Expands/collapses the per-file details panel under a row (Tier 2 metadata).</summary>
 		public ReactiveCommand<DuplicateItemVM, Unit> ToggleItemDetailsCommand => ReactiveCommand.Create<DuplicateItemVM>(item => {
 			if (item == null) return;

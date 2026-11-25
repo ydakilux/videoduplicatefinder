@@ -877,5 +877,16 @@
 	"Results.Row.CompareWithBest": "Сравнить значения с лучшим",
 	"Settings.Row.Columns.Title": "Столбцы в списке результатов",
 	"Settings.Row.Columns.Desc": "Какие столбцы отображаются в списке результатов. Также доступно по правому щелчку по заголовкам столбцов.",
-	"QualityCriteria.Codec": "Видеокодек"
+	"QualityCriteria.Codec": "Видеокодек",
+	"Settings.Row.AutomationServer.Title": "Сервер автоматизации MCP / CLI",
+	"Settings.Row.AutomationServer.Desc": "Слушает локальный именованный канал, позволяя vdf-cli mcp и ИИ-помощникам просматривать, фильтровать, проверять и отмечать дубликаты в реальном времени.",
+	"Mcp.Status.FilterUpdated": "MCP: Фильтр обновлён (Путь: '{0}', Тип: {1}).",
+	"Mcp.Status.GroupHighlighted": "MCP: Группа {0} выделена.",
+	"Mcp.Status.ItemsUpdated": "MCP: Обновлено элементов: {0} (отмечено={1}).",
+	"Mcp.Status.SelectApplied": "MCP: Действие '{0}' применено к {1} эл. в активном фильтре.",
+	"Mcp.Status.AuditRunning": "MCP: Проверка выбора в активном фильтре...",
+	"Mcp.Status.AuditCompleted": "MCP: Проверка завершена (отмечено: {0}, нарушений: {1}).",
+	"Mcp.Status.Undo": "MCP: Выбор отменён.",
+	"Mcp.Status.Cleared": "MCP: Все отметки сняты.",
+	"Mcp.Status.Inverted": "MCP: Отметки инвертированы."
 }

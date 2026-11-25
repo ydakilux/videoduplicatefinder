@@ -877,5 +877,16 @@
 	"Results.Row.CompareWithBest": "Compare values with the best",
 	"Settings.Row.Columns.Title": "Columns in the results list",
 	"Settings.Row.Columns.Desc": "Which columns the results list shows. Also available by right-clicking the column headers.",
-	"QualityCriteria.Codec": "Video Codec"
+	"QualityCriteria.Codec": "Video Codec",
+	"Settings.Row.AutomationServer.Title": "MCP / CLI automation server",
+	"Settings.Row.AutomationServer.Desc": "Listen on a local named pipe so vdf-cli mcp and AI assistants can inspect, filter, audit, and toggle selections live.",
+	"Mcp.Status.FilterUpdated": "MCP: Filter updated (Path: '{0}', Type: {1}).",
+	"Mcp.Status.GroupHighlighted": "MCP: Group {0} highlighted.",
+	"Mcp.Status.ItemsUpdated": "MCP: {0} item(s) updated (checked={1}).",
+	"Mcp.Status.SelectApplied": "MCP: Applied '{0}' to {1} item(s) in active filter.",
+	"Mcp.Status.AuditRunning": "MCP: Auditing selection on active filter...",
+	"Mcp.Status.AuditCompleted": "MCP: Audit completed ({0} checked, {1} violation(s)).",
+	"Mcp.Status.Undo": "MCP: Selection undone.",
+	"Mcp.Status.Cleared": "MCP: Cleared all selections.",
+	"Mcp.Status.Inverted": "MCP: Inverted selections."
 }

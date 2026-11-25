@@ -39,6 +39,7 @@ namespace VDF.GUI.Views {
 	public class MainWindow : Window {
 		bool keepBackupFile;
 		bool hasExited;
+		Automation.GuiAutomationServer? automationServer;
 		DispatcherTimer? settingsSaveDebounce;
 
 		void RestartSettingsSaveDebounce() {
@@ -359,6 +360,7 @@ namespace VDF.GUI.Views {
 		void MainWindow_Exit(object? sender, ControlledApplicationLifetimeExitEventArgs e) {
 			if (hasExited) return;
 			hasExited = true;
+			automationServer?.Stop();
 			SettingsFile.SaveSettings();
 		}
 
@@ -368,6 +370,23 @@ namespace VDF.GUI.Views {
 			vm.NotifyNativeFfmpegMismatch();
 			vm.LoadDatabase();
 			vm.RestoreBackupScanResults();
+
+			if (SettingsFile.Instance.EnableAutomationServer) {
+				automationServer = new Automation.GuiAutomationServer(vm, SettingsFile.Instance.AutomationPipeName);
+				automationServer.Start();
+			}
+			SettingsFile.Instance.PropertyChanged += (_, args) => {
+				if (args.PropertyName == nameof(SettingsFile.EnableAutomationServer)) {
+					if (SettingsFile.Instance.EnableAutomationServer) {
+						automationServer ??= new Automation.GuiAutomationServer(vm, SettingsFile.Instance.AutomationPipeName);
+						automationServer.Start();
+					}
+					else {
+						automationServer?.Stop();
+						automationServer = null;
+					}
+				}
+			};
 		}
 
 

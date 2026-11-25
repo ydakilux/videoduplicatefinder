@@ -877,5 +877,16 @@
 	"Results.Row.CompareWithBest": "与最佳项比较数值",
 	"Settings.Row.Columns.Title": "结果列表中的列",
 	"Settings.Row.Columns.Desc": "结果列表显示哪些列。也可右键单击列标题进行设置。",
-	"QualityCriteria.Codec": "视频编码 (Codec)"
+	"QualityCriteria.Codec": "视频编码 (Codec)",
+	"Settings.Row.AutomationServer.Title": "MCP / CLI 自动化服务",
+	"Settings.Row.AutomationServer.Desc": "监听本地命名管道，允许 vdf-cli mcp 和 AI 助手实时检查、筛选、审计和勾选重复项。",
+	"Mcp.Status.FilterUpdated": "MCP：筛选器已更新（路径：'{0}'，类型：{1}）。",
+	"Mcp.Status.GroupHighlighted": "MCP：已高亮显示组 {0}。",
+	"Mcp.Status.ItemsUpdated": "MCP：已更新 {0} 个项目（勾选={1}）。",
+	"Mcp.Status.SelectApplied": "MCP：已对当前筛选中的 {1} 个项目应用 '{0}'。",
+	"Mcp.Status.AuditRunning": "MCP：正在审计当前筛选中的选择...",
+	"Mcp.Status.AuditCompleted": "MCP：审计完成（已勾选 {0} 项，{1} 项违规）。",
+	"Mcp.Status.Undo": "MCP：已撤销选择。",
+	"Mcp.Status.Cleared": "MCP：已清除所有选择。",
+	"Mcp.Status.Inverted": "MCP：已反选所有项目。"
 }

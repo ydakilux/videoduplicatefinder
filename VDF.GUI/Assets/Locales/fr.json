@@ -877,5 +877,16 @@
 	"Results.Row.CompareWithBest": "Comparer les valeurs au meilleur",
 	"Settings.Row.Columns.Title": "Colonnes de la liste des résultats",
 	"Settings.Row.Columns.Desc": "Les colonnes affichées par la liste des résultats. Également accessible par un clic droit sur les en-têtes de colonnes.",
-	"QualityCriteria.Codec": "Codec vidéo"
+	"QualityCriteria.Codec": "Codec vidéo",
+	"Settings.Row.AutomationServer.Title": "Serveur d'automatisation MCP / CLI",
+	"Settings.Row.AutomationServer.Desc": "Écoute sur un tube nommé local pour permettre à vdf-cli mcp et aux assistants IA d'inspecter, filtrer, auditer et cocher les doublons en direct.",
+	"Mcp.Status.FilterUpdated": "MCP : Filtre mis à jour (Chemin : '{0}', Type : {1}).",
+	"Mcp.Status.GroupHighlighted": "MCP : Groupe {0} mis en surbrillance.",
+	"Mcp.Status.ItemsUpdated": "MCP : {0} élément(s) mis à jour (coché={1}).",
+	"Mcp.Status.SelectApplied": "MCP : Action '{0}' appliquée à {1} élément(s) du filtre actif.",
+	"Mcp.Status.AuditRunning": "MCP : Audit de sélection en cours sur le filtre actif...",
+	"Mcp.Status.AuditCompleted": "MCP : Audit terminé ({0} cochés, {1} violation(s)).",
+	"Mcp.Status.Undo": "MCP : Annulation effectuée.",
+	"Mcp.Status.Cleared": "MCP : Toutes les sélections ont été effacées.",
+	"Mcp.Status.Inverted": "MCP : Sélections inversées."
 }

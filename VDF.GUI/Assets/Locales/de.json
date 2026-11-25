@@ -877,5 +877,16 @@
 	"Results.Row.CompareWithBest": "Werte mit dem besten vergleichen",
 	"Settings.Row.Columns.Title": "Spalten der Ergebnisliste",
 	"Settings.Row.Columns.Desc": "Welche Spalten die Ergebnisliste zeigt. Auch per Rechtsklick auf die Spaltenköpfe erreichbar.",
-	"QualityCriteria.Codec": "Video-Codec"
+	"QualityCriteria.Codec": "Video-Codec",
+	"Settings.Row.AutomationServer.Title": "MCP- / CLI-Automatisierungsserver",
+	"Settings.Row.AutomationServer.Desc": "Lauscht auf einer lokalen Named Pipe, damit vdf-cli mcp und KI-Assistenten Ergebnisse live prüfen, filtern und markieren können.",
+	"Mcp.Status.FilterUpdated": "MCP: Filter aktualisiert (Pfad: '{0}', Typ: {1}).",
+	"Mcp.Status.GroupHighlighted": "MCP: Gruppe {0} hervorgehoben.",
+	"Mcp.Status.ItemsUpdated": "MCP: {0} Element(e) aktualisiert (markiert={1}).",
+	"Mcp.Status.SelectApplied": "MCP: '{0}' auf {1} Element(e) im aktiven Filter angewendet.",
+	"Mcp.Status.AuditRunning": "MCP: Auswahl im aktiven Filter wird geprüft...",
+	"Mcp.Status.AuditCompleted": "MCP: Prüfung abgeschlossen ({0} markiert, {1} Verstoß/Verstöße).",
+	"Mcp.Status.Undo": "MCP: Auswahl rückgängig gemacht.",
+	"Mcp.Status.Cleared": "MCP: Alle Markierungen aufgehoben.",
+	"Mcp.Status.Inverted": "MCP: Auswahl umgekehrt."
 }

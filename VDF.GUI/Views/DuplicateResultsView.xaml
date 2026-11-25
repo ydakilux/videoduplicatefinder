@@ -1181,6 +1181,10 @@
           <TextBlock FontSize="12" Opacity="{DynamicResource VdfTextFaintOpacity}">
             <Run Text="{Binding TotalSizeRemoved, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Source={x:Static local:App.Lang}, Path=[Results.Status.RemovedSuffix]}" />
           </TextBlock>
+          <TextBlock FontSize="12" Foreground="{DynamicResource VdfAccentTextBrush}"
+                     FontWeight="SemiBold"
+                     IsVisible="{Binding McpStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                     Text="{Binding McpStatusText}" />
         </StackPanel>
         <!-- determinate thumbnail-load progress (#791) -->
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8"

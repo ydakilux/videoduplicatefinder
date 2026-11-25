@@ -247,6 +247,16 @@ namespace VDF.GUI.Data {
 			get;
 			set => this.RaiseAndSetIfChanged(ref field, value);
 		}
+		[JsonPropertyName("EnableAutomationServer")]
+		public bool EnableAutomationServer {
+			get;
+			set => this.RaiseAndSetIfChanged(ref field, value);
+		} = true;
+		[JsonPropertyName("AutomationPipeName")]
+		public string AutomationPipeName {
+			get;
+			set => this.RaiseAndSetIfChanged(ref field, value);
+		} = "vdf-gui-automation";
 		[JsonPropertyName("AlwaysRetryFailedSampling")]
 		public bool AlwaysRetryFailedSampling {
 			get;

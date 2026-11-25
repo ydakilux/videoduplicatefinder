@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="VDF.GUI" />
+    <InternalsVisibleTo Include="VDF.GUI.Tests" />
+    <InternalsVisibleTo Include="VDF.GUI.HeadlessTests" />
     <InternalsVisibleTo Include="vdf-cli" />
     <InternalsVisibleTo Include="VDF.Web" />
     <InternalsVisibleTo Include="VDF.Core.Tests" />

@@ -275,6 +275,33 @@ namespace VDF.GUI.ViewModels {
 			get => _PotentialSavings;
 			set => this.RaiseAndSetIfChanged(ref _PotentialSavings, value);
 		}
+		string? _McpStatusText;
+		int _mcpStatusVersion;
+		public string? McpStatusText {
+			get => _McpStatusText;
+			set => this.RaiseAndSetIfChanged(ref _McpStatusText, value);
+		}
+
+		internal void SetMcpStatus(string? text, bool announce = true, int clearAfterMs = 8000) {
+			int version = Interlocked.Increment(ref _mcpStatusVersion);
+			McpStatusText = text;
+			if (announce && !string.IsNullOrWhiteSpace(text)) {
+				Announce(text);
+			}
+			if (!string.IsNullOrWhiteSpace(text) && clearAfterMs > 0) {
+				_ = ClearMcpStatusAfterDelayAsync(version, clearAfterMs);
+			}
+		}
+
+		async Task ClearMcpStatusAfterDelayAsync(int version, int delayMs) {
+			await Task.Delay(delayMs);
+			if (version == Volatile.Read(ref _mcpStatusVersion)) {
+				Dispatcher.UIThread.Post(() => {
+					if (version == Volatile.Read(ref _mcpStatusVersion))
+						McpStatusText = null;
+				});
+			}
+		}
 		long _TotalSizeRemovedInternal;
 		long TotalSizeRemovedInternal {
 			get => _TotalSizeRemovedInternal;
@@ -1979,6 +2006,57 @@ Non-Windows setup:
 			SyncCoreSettings();
 			await Scanner.RetrieveThumbnailsForItems(items);
 		});
+
+		internal (DuplicateItemVM? Keeper, string? Reason) PickGroupKeeper(IList<DuplicateItemVM> groupItems) {
+			if (groupItems.Count == 0) return (null, null);
+			if (groupItems.Count == 1) return (groupItems[0], null);
+			var (keeper, decidedBy) = VDF.Core.Utils.QualityRanker.PickKeeperWithReason(
+				groupItems,
+				ActiveQualityCriteria,
+				d => d.ItemInfo.IsImage);
+			return (keeper, decidedBy?.Name);
+		}
+
+		internal async Task EnsureThumbnailsLoadedAsync(IReadOnlyList<DuplicateItem> items) {
+			if (items.Count == 0) return;
+			SyncCoreSettings();
+			await Scanner.RetrieveThumbnailsForItems(items.ToList());
+		}
+
+		internal async Task<int> RemoveItemsFromListAsync(IReadOnlyCollection<DuplicateItemVM> itemsToRemove, bool excludeFromFutureScans = false) {
+			if (itemsToRemove.Count == 0 || Duplicates.Count == 0) return 0;
+
+			var targetSet = new HashSet<DuplicateItemVM>(itemsToRemove, ReferenceEqualityComparer<DuplicateItemVM>.Instance);
+			var paths = targetSet.Select(d => d.ItemInfo.Path).ToList();
+
+			await Task.Run(() => {
+				foreach (var path in paths) {
+					if (excludeFromFutureScans)
+						ScanEngine.BlackListFileEntry(path);
+					else
+						ScanEngine.RemoveFromDatabase(new FileEntry { Path = path });
+				}
+				ScanEngine.SaveDatabase();
+			});
+
+			int removed = 0;
+			for (int i = Duplicates.Count - 1; i >= 0; i--) {
+				if (targetSet.Contains(Duplicates[i])) {
+					Duplicates.RemoveAt(i);
+					removed++;
+				}
+			}
+
+			if (removed > 0) {
+				DropSingletonGroups();
+				RefreshGroupStats();
+				RefreshResultsView();
+				if (SettingsFile.Instance.BackupAfterListChanged)
+					await ExportScanResults(BackupScanResultsFile);
+			}
+
+			return removed;
+		}
 
 		List<DuplicateItemVM> CheckedItemsToDelete => ScopedDuplicates().Where(d => d.Checked && d.IsVisibleInFilter).ToList();
 

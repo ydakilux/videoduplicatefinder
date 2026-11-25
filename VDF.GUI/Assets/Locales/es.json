@@ -877,5 +877,16 @@
 	"Results.Row.CompareWithBest": "Comparar valores con el mejor",
 	"Settings.Row.Columns.Title": "Columnas de la lista de resultados",
 	"Settings.Row.Columns.Desc": "Qué columnas muestra la lista de resultados. También disponible con clic derecho en los encabezados de columna.",
-	"QualityCriteria.Codec": "Códec de vídeo"
+	"QualityCriteria.Codec": "Códec de vídeo",
+	"Settings.Row.AutomationServer.Title": "Servidor de automatización MCP / CLI",
+	"Settings.Row.AutomationServer.Desc": "Escucha en una tubería local con nombre para que vdf-cli mcp y los asistentes de IA puedan inspeccionar, filtrar, auditar y marcar selecciones en vivo.",
+	"Mcp.Status.FilterUpdated": "MCP: Filtro actualizado (Ruta: '{0}', Tipo: {1}).",
+	"Mcp.Status.GroupHighlighted": "MCP: Grupo {0} resaltado.",
+	"Mcp.Status.ItemsUpdated": "MCP: {0} elemento(s) actualizado(s) (marcado={1}).",
+	"Mcp.Status.SelectApplied": "MCP: '{0}' aplicado a {1} elemento(s) en el filtro activo.",
+	"Mcp.Status.AuditRunning": "MCP: Auditando selección en el filtro activo...",
+	"Mcp.Status.AuditCompleted": "MCP: Auditoría completada ({0} marcados, {1} infracción(es)).",
+	"Mcp.Status.Undo": "MCP: Selección deshecha.",
+	"Mcp.Status.Cleared": "MCP: Todas las selecciones borradas.",
+	"Mcp.Status.Inverted": "MCP: Selecciones invertidas."
 }
