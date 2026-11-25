@@ -17,6 +17,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using VDF.Core.Automation;
 using VDF.Core.Utils;
 using VDF.Core.ViewModels;
@@ -25,6 +26,25 @@ using VDF.GUI.ViewModels;
 
 namespace VDF.GUI.Automation {
 	internal static class SelectionAuditEngine {
+		// Keep cancellation inside enumeration, including the inner loops of a single large group.
+		static IEnumerable<T> WithCancellation<T>(IEnumerable<T> items, CancellationToken ct) =>
+			ct.CanBeCanceled ? EnumerateWithCancellation(items, ct) : items;
+
+		static IEnumerable<T> EnumerateWithCancellation<T>(IEnumerable<T> items, CancellationToken ct) {
+			foreach (var item in items) {
+				ct.ThrowIfCancellationRequested();
+				yield return item;
+			}
+			ct.ThrowIfCancellationRequested();
+		}
+
+		static IEnumerable<QualityRanker.Criterion<DuplicateItemVM>> WithCancellableAccessors(
+			IEnumerable<QualityRanker.Criterion<DuplicateItemVM>> criteria, CancellationToken ct) =>
+			!ct.CanBeCanceled ? criteria : criteria.Select(criterion => new QualityRanker.Criterion<DuplicateItemVM>(
+				criterion.Name, item => {
+					ct.ThrowIfCancellationRequested();
+					return criterion.Accessor(item);
+				}, criterion.VideoOnly, criterion.Ascending, criterion.NearTie));
 
 		/// <summary>
 		/// Evaluates which items match an expression or preset strategy across duplicate groups,
@@ -36,35 +56,36 @@ namespace VDF.GUI.Automation {
 				string? expression,
 				string? strategy,
 				bool allowAllInGroup,
-				bool currentFilterOnly = true) {
+				bool currentFilterOnly = true,
+				CancellationToken ct = default) {
 
+			ct.ThrowIfCancellationRequested();
 			Func<DuplicateItem, bool>? interpreter = null;
 			if (!string.IsNullOrWhiteSpace(expression)) {
 				interpreter = SelectionExpression.Compile(expression);
 			}
 
 			// Group by GroupId across all items to know the complete group context
-			var groups = allItems
-				.GroupBy(d => d.ItemInfo.GroupId)
-				.ToList();
+			var groups = WithCancellation(allItems, ct).GroupBy(d => d.ItemInfo.GroupId);
 
 			var partialMatches = new List<DuplicateItemVM>();
 			var fullGroups = new List<List<DuplicateItemVM>>();
 
 			foreach (var group in groups) {
-				var groupAllItems = group.ToList();
+				ct.ThrowIfCancellationRequested();
+				var groupAllItems = WithCancellation(group, ct).ToList();
 				var scopeItems = currentFilterOnly
-					? groupAllItems.Where(d => d.IsVisibleInFilter).ToList()
+					? WithCancellation(groupAllItems, ct).Where(d => d.IsVisibleInFilter).ToList()
 					: groupAllItems;
 
 				if (scopeItems.Count == 0) continue;
 
 				List<DuplicateItemVM> matchedInGroup;
 				if (interpreter != null) {
-					matchedInGroup = scopeItems.Where(item => interpreter(item.ItemInfo)).ToList();
+					matchedInGroup = WithCancellation(scopeItems, ct).Where(item => interpreter(item.ItemInfo)).ToList();
 				}
 				else if (!string.IsNullOrWhiteSpace(strategy)) {
-					matchedInGroup = EvaluateStrategyOnGroup(groupAllItems, scopeItems, strategy);
+					matchedInGroup = EvaluateStrategyOnGroup(groupAllItems, scopeItems, strategy, ct);
 				}
 				else {
 					throw new ArgumentException("Either 'expression' or 'strategy' must be provided.");
@@ -73,7 +94,9 @@ namespace VDF.GUI.Automation {
 				if (matchedInGroup.Count == 0) continue;
 
 				// Safety calculation: would checking these items leave ZERO kept files across the ENTIRE group?
-				int hiddenKept = groupAllItems.Count(d => !scopeItems.Contains(d) && !d.Checked);
+				int hiddenKept = currentFilterOnly
+					? WithCancellation(groupAllItems, ct).Count(d => !d.IsVisibleInFilter && !d.Checked)
+					: 0;
 				int scopeKept = scopeItems.Count - matchedInGroup.Count;
 				bool wouldWipeEntireGroup = (scopeKept + hiddenKept) == 0;
 
@@ -91,14 +114,18 @@ namespace VDF.GUI.Automation {
 				fullGroups = new List<List<DuplicateItemVM>>();
 			}
 
+			ct.ThrowIfCancellationRequested();
 			return (partialMatches, fullGroups, skipped);
 		}
 
 		static List<DuplicateItemVM> EvaluateStrategyOnGroup(
 			List<DuplicateItemVM> fullGroup,
-			List<DuplicateItemVM> scopeItems,
-			string strategy) {
+			List<DuplicateItemVM> scope,
+			string strategy,
+			CancellationToken ct) {
 
+			var allItems = WithCancellation(fullGroup, ct);
+			var scopeItems = WithCancellation(scope, ct);
 			var normalized = strategy.Trim().ToLowerInvariant().Replace("_", "-");
 			switch (normalized) {
 				case "lowest-quality":
@@ -106,7 +133,7 @@ namespace VDF.GUI.Automation {
 					var activeCriteria = MainWindowVM.ResolveCriteria(
 						Data.SettingsFile.Instance.QualityCriteriaOrder,
 						Data.SettingsFile.Instance.QualityCriteriaDisabled);
-					var keeper = QualityRanker.PickKeeper(fullGroup, activeCriteria, d => d.ItemInfo.IsImage);
+					var keeper = QualityRanker.PickKeeper(fullGroup, WithCancellableAccessors(activeCriteria, ct), d => d.ItemInfo.IsImage);
 					return scopeItems.Where(d => !ReferenceEquals(d, keeper)).ToList();
 				}
 				case "best-codec":
@@ -116,7 +143,7 @@ namespace VDF.GUI.Automation {
 					foreach (var item in scopeItems) {
 						if (item.ItemInfo.IsImage) continue;
 						int currentRank = MainWindowVM.CodecRank(item.ItemInfo.Format);
-						bool hasBetter = fullGroup.Any(other =>
+						bool hasBetter = allItems.Any(other =>
 							!ReferenceEquals(other, item) &&
 							!other.ItemInfo.IsImage &&
 							other.ItemInfo.FrameSizeInt >= item.ItemInfo.FrameSizeInt &&
@@ -128,19 +155,19 @@ namespace VDF.GUI.Automation {
 					return matches;
 				}
 				case "smallest-file": {
-					long maxSize = fullGroup.Max(d => d.ItemInfo.SizeLong);
+					long maxSize = allItems.Max(d => d.ItemInfo.SizeLong);
 					return scopeItems.Where(d => d.ItemInfo.SizeLong < maxSize).ToList();
 				}
 				case "largest-file": {
-					long minSize = fullGroup.Min(d => d.ItemInfo.SizeLong);
+					long minSize = allItems.Min(d => d.ItemInfo.SizeLong);
 					return scopeItems.Where(d => d.ItemInfo.SizeLong > minSize).ToList();
 				}
 				case "worst-resolution": {
-					int maxRes = fullGroup.Max(d => d.ItemInfo.FrameSizeInt);
+					int maxRes = allItems.Max(d => d.ItemInfo.FrameSizeInt);
 					return scopeItems.Where(d => d.ItemInfo.FrameSizeInt < maxRes).ToList();
 				}
 				case "shortest-duration": {
-					var maxDur = fullGroup.Max(d => d.ItemInfo.Duration);
+					var maxDur = allItems.Max(d => d.ItemInfo.Duration);
 					return scopeItems.Where(d => d.ItemInfo.Duration < maxDur).ToList();
 				}
 				case "identical": {
@@ -152,11 +179,11 @@ namespace VDF.GUI.Automation {
 					return scopeItems.Where(d => !ReferenceEquals(d, first) && d.EqualsButQuality(first)).ToList();
 				}
 				case "oldest": {
-					var newest = fullGroup.Max(d => d.ItemInfo.DateCreated);
+					var newest = allItems.Max(d => d.ItemInfo.DateCreated);
 					return scopeItems.Where(d => d.ItemInfo.DateCreated < newest).ToList();
 				}
 				case "newest": {
-					var oldest = fullGroup.Min(d => d.ItemInfo.DateCreated);
+					var oldest = allItems.Min(d => d.ItemInfo.DateCreated);
 					return scopeItems.Where(d => d.ItemInfo.DateCreated > oldest).ToList();
 				}
 				default:
@@ -172,16 +199,16 @@ namespace VDF.GUI.Automation {
 			IReadOnlyList<DuplicateItemVM> allItems,
 			string? criteriaExpression = null,
 			bool requireAtLeastOneKept = true,
-			bool currentFilterOnly = true) {
+			bool currentFilterOnly = true,
+			CancellationToken ct = default) {
 
+			ct.ThrowIfCancellationRequested();
 			Func<DuplicateItem, bool>? criteriaPredicate = null;
 			if (!string.IsNullOrWhiteSpace(criteriaExpression)) {
 				criteriaPredicate = SelectionExpression.Compile(criteriaExpression);
 			}
 
-			var groups = allItems
-				.GroupBy(d => d.ItemInfo.GroupId)
-				.ToList();
+			var groups = WithCancellation(allItems, ct).GroupBy(d => d.ItemInfo.GroupId);
 
 			var violations = new List<AuditViolationDto>();
 			int totalChecked = 0;
@@ -189,17 +216,18 @@ namespace VDF.GUI.Automation {
 			long totalWastedSpace = 0;
 			bool hasPartiallyFiltered = false;
 
-			var activeCriteria = MainWindowVM.ResolveCriteria(
+			var activeCriteria = WithCancellableAccessors(MainWindowVM.ResolveCriteria(
 				Data.SettingsFile.Instance.QualityCriteriaOrder,
-				Data.SettingsFile.Instance.QualityCriteriaDisabled);
+				Data.SettingsFile.Instance.QualityCriteriaDisabled), ct);
 
 			int auditedGroupsCount = 0;
 			int auditedItemsCount = 0;
 
 			foreach (var group in groups) {
-				var fullGroupItems = group.ToList();
-				var visibleItems = fullGroupItems.Where(d => d.IsVisibleInFilter).ToList();
-				var hiddenItems = fullGroupItems.Where(d => !d.IsVisibleInFilter).ToList();
+				ct.ThrowIfCancellationRequested();
+				var fullGroupItems = WithCancellation(group, ct).ToList();
+				var groupItems = WithCancellation(fullGroupItems, ct);
+				var visibleItems = groupItems.Where(d => d.IsVisibleInFilter).ToList();
 
 				// If auditing filter only, skip groups that have no visible items
 				if (currentFilterOnly && visibleItems.Count == 0) {
@@ -210,17 +238,18 @@ namespace VDF.GUI.Automation {
 				var scopeItems = currentFilterOnly ? visibleItems : fullGroupItems;
 				auditedItemsCount += scopeItems.Count;
 
-				var checkedInScope = scopeItems.Where(d => d.Checked).ToList();
-				var keptInScope = scopeItems.Where(d => !d.Checked).ToList();
-
-				int hiddenKeptCount = hiddenItems.Count(d => !d.Checked);
-				int hiddenCheckedCount = hiddenItems.Count(d => d.Checked);
+				var cancellableScope = WithCancellation(scopeItems, ct);
+				var checkedInScope = cancellableScope.Where(d => d.Checked).ToList();
+				var keptInScope = cancellableScope.Where(d => !d.Checked).ToList();
+				var checkedItems = WithCancellation(checkedInScope, ct);
+				var keptItems = WithCancellation(keptInScope, ct);
+				int hiddenKeptCount = groupItems.Count(d => !d.IsVisibleInFilter && !d.Checked);
 
 				totalChecked += checkedInScope.Count;
 				totalKept += keptInScope.Count;
-				totalWastedSpace += checkedInScope.Sum(d => d.ItemInfo.SizeLong);
+				totalWastedSpace += checkedItems.Sum(d => d.ItemInfo.SizeLong);
 
-				if (hiddenItems.Count > 0) {
+				if (visibleItems.Count < fullGroupItems.Count) {
 					hasPartiallyFiltered = true;
 				}
 
@@ -249,12 +278,14 @@ namespace VDF.GUI.Automation {
 
 				// 2. Custom Criteria Expression verification on checked items
 				if (criteriaPredicate != null) {
-					foreach (var checkedItem in checkedInScope) {
+					foreach (var checkedItem in checkedItems) {
 						bool satisfiesCriteria;
 						try {
 							satisfiesCriteria = criteriaPredicate(checkedItem.ItemInfo);
 						}
 						catch (Exception ex) {
+							// Cancellation aborts the audit rather than becoming an item warning.
+							ct.ThrowIfCancellationRequested();
 							violations.Add(new AuditViolationDto {
 								GroupId = group.Key,
 								Path = checkedItem.ItemInfo.Path,
@@ -280,8 +311,8 @@ namespace VDF.GUI.Automation {
 				// 3. Quality Inversion check: Did the user check the best item while keeping an inferior one?
 				if (checkedInScope.Count > 0 && keptInScope.Count > 0 && fullGroupItems.Count > 1) {
 					var (keeper, decidedBy) = QualityRanker.PickKeeperWithReason(fullGroupItems, activeCriteria, d => d.ItemInfo.IsImage);
-					if (keeper != null && keeper.Checked && scopeItems.Contains(keeper)) {
-						var keptExample = keptInScope.FirstOrDefault(k => !ReferenceEquals(k, keeper));
+					if (keeper != null && keeper.Checked && cancellableScope.Contains(keeper)) {
+						var keptExample = keptItems.FirstOrDefault(k => !ReferenceEquals(k, keeper));
 						if (keptExample != null) {
 							string reason = decidedBy != null ? $"by {decidedBy.Name}" : "by quality ranking";
 							violations.Add(new AuditViolationDto {
@@ -296,11 +327,11 @@ namespace VDF.GUI.Automation {
 				}
 
 				// 4. Codec Inversion check: Is a modern/superior codec (AV1, HEVC) checked while an inferior codec (H.264, MPEG-4) of similar resolution is kept?
-				foreach (var checkedItem in checkedInScope) {
+				foreach (var checkedItem in checkedItems) {
 					if (checkedItem.ItemInfo.IsImage) continue;
 					int checkedRank = MainWindowVM.CodecRank(checkedItem.ItemInfo.Format);
 
-					foreach (var keptItem in keptInScope) {
+					foreach (var keptItem in keptItems) {
 						if (keptItem.ItemInfo.IsImage) continue;
 						int keptRank = MainWindowVM.CodecRank(keptItem.ItemInfo.Format);
 
@@ -318,18 +349,20 @@ namespace VDF.GUI.Automation {
 				}
 			}
 
-			bool isSafe = !violations.Any(v => string.Equals(v.Severity, "Error", StringComparison.OrdinalIgnoreCase));
+			var cancellableViolations = WithCancellation(violations, ct);
+			bool isSafe = !cancellableViolations.Any(v => string.Equals(v.Severity, "Error", StringComparison.OrdinalIgnoreCase));
 
 			string summary;
 			if (violations.Count == 0) {
 				summary = $"Selection is healthy. {totalChecked} items checked across {auditedGroupsCount} groups ({totalWastedSpace / 1024 / 1024:N0} MB). No rule violations detected.";
 			}
 			else {
-				int errors = violations.Count(v => string.Equals(v.Severity, "Error", StringComparison.OrdinalIgnoreCase));
-				int warnings = violations.Count(v => string.Equals(v.Severity, "Warning", StringComparison.OrdinalIgnoreCase));
+				int errors = cancellableViolations.Count(v => string.Equals(v.Severity, "Error", StringComparison.OrdinalIgnoreCase));
+				int warnings = cancellableViolations.Count(v => string.Equals(v.Severity, "Warning", StringComparison.OrdinalIgnoreCase));
 				summary = $"Audit completed with {errors} critical errors and {warnings} warnings. Checked: {totalChecked}, Kept: {totalKept}.";
 			}
 
+			ct.ThrowIfCancellationRequested();
 			return new AuditResultDto {
 				IsSafe = isSafe,
 				TotalGroups = auditedGroupsCount,

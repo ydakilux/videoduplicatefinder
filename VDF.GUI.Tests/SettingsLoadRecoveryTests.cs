@@ -41,6 +41,47 @@ public class SettingsLoadRecoveryTests : IDisposable {
 	}
 
 	[Fact]
+	public void AutomationServer_RequiresOptIn() {
+		Assert.False(new SettingsFile().EnableAutomationServer);
+		string path = WriteSettingsFile("Settings.json", "{}");
+		SettingsFile.LoadSettings(path);
+		Assert.False(SettingsFile.Instance.EnableAutomationServer);
+	}
+
+	[Fact]
+	public void AutomationServer_LegacyEnabledSettingIsDisabledAndMigrationIsPersisted() {
+		string path = WriteSettingsFile("Settings.json", """{"EnableAutomationServer":true,"AutomationPipeName":"custom-pipe"}""");
+		SettingsFile.SetSettingsPath(path);
+
+		SettingsFile.LoadSettingsAtStartup();
+
+		Assert.Null(SettingsFile.StartupLoadError);
+		Assert.False(SettingsFile.Instance.EnableAutomationServer);
+		using var saved = JsonDocument.Parse(File.ReadAllText(path));
+		Assert.False(saved.RootElement.GetProperty("EnableAutomationServer").GetBoolean());
+		Assert.Equal(1, saved.RootElement.GetProperty("AutomationOptInVersion").GetInt32());
+		Assert.Equal("custom-pipe", saved.RootElement.GetProperty("AutomationPipeName").GetString());
+	}
+
+	[Fact]
+	public void AutomationServer_ExplicitReenableAfterMigrationSurvivesReload() {
+		string path = WriteSettingsFile("Settings.json", """{"EnableAutomationServer":true}""");
+		SettingsFile.LoadSettings(path);
+		Assert.False(SettingsFile.Instance.EnableAutomationServer);
+		try {
+			SettingsFile.Instance.EnableAutomationServer = true;
+			SettingsFile.SaveSettings(path);
+
+			SettingsFile.LoadSettings(path);
+
+			Assert.True(SettingsFile.Instance.EnableAutomationServer);
+		}
+		finally {
+			SettingsFile.Instance.EnableAutomationServer = false;
+		}
+	}
+
+	[Fact]
 	public void StartupLoad_TruncatedSettingsFile_DoesNotThrowAndKeepsCorruptCopy() {
 		// Round-trip real settings, then truncate to simulate a torn write.
 		string path = Path.Combine(dir, "Settings.json");

@@ -46,6 +46,8 @@ namespace VDF.GUI.Tests {
 		[InlineData("item.Path.Contains(\"videos\")", true)]
 		[InlineData("item.Duration.Minutes > 15", true)]
 		[InlineData("Regex.IsMatch(item.Path, \"S\\\\d+E\\\\d+\")", true)]
+		[InlineData("Regex.IsMatch(item.Format, \"JPG\", RegexOptions.IgnoreCase)", true)]
+		[InlineData("Regex.Match(item.Format, \"j.g\").Success", true)]
 		// Other referenced types keep working:
 		[InlineData("Math.Abs(item.SizeLong) >= 5000", true)]
 		// Note: an int argument ("FromMinutes(15)") is ambiguous since .NET 10 added
@@ -68,6 +70,27 @@ namespace VDF.GUI.Tests {
 			// PrimitiveTypes only: no Convert/Activator/Type registration.
 			Assert.ThrowsAny<Exception>(() => SelectionExpression.Compile("Convert.ToInt32(item.Path) > 0"));
 			Assert.ThrowsAny<Exception>(() => SelectionExpression.Compile("Activator.CreateInstance(null) != null"));
+		}
+
+		[Theory]
+		[InlineData("Regex.IsMatch(item.Path, \"^(a+)+$\")")]
+		[InlineData("Regex.Match(item.Path, \"^(a+)+$\").Success")]
+		[InlineData("Regex.Matches(item.Path, \"^(a+)+$\").Count != 0")]
+		[InlineData("Regex.Match(item.Path, \"^start|^(a+)+$\", RegexOptions.Multiline).NextMatch().Success")]
+		[InlineData("Regex.Replace(item.Path, \"^(a+)+$\", \"\") == \"\"")]
+		[InlineData("Regex.Split(item.Path, \"^(a+)+$\").Length == 0")]
+		public void RegexEvaluation_UsesBoundedMatching(string expression) {
+			string path = new string('a', 8192) + "!";
+			if (expression.Contains("NextMatch")) path = "start\n" + path;
+			var predicate = SelectionExpression.Compile(expression);
+			Assert.Equal(SelectionExpression.RegexTimeoutMessage, Assert.Throws<SelectionExpression.MatchTimedOutException>(() => predicate(Item(path))).Message);
+		}
+
+		[Theory]
+		[InlineData("new Regex(\"a\").IsMatch(item.Path)")]
+		[InlineData("Regex.IsMatch(item.Path, \"a\", RegexOptions.None, TimeSpan.FromSeconds(999.0))")]
+		public void RegexEvaluation_CannotOptOutOfTimeout(string expression) {
+			Assert.ThrowsAny<Exception>(() => SelectionExpression.Compile(expression));
 		}
 	}
 

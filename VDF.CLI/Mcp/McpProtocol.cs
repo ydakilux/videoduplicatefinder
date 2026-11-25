@@ -17,21 +17,24 @@
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace VDF.CLI.Mcp {
 
 	public sealed class JsonRpcRequest {
 		[JsonPropertyName("jsonrpc")]
-		public string JsonRpc { get; set; } = "2.0";
+		public string? JsonRpc { get; set; }
 
 		[JsonPropertyName("id")]
-		public object? Id { get; set; }
+		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+		public JsonElement Id { get; set; }
 
 		[JsonPropertyName("method")]
-		public string Method { get; set; } = string.Empty;
+		public string? Method { get; set; }
 
 		[JsonPropertyName("params")]
-		public JsonElement? Params { get; set; }
+		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+		public JsonElement Params { get; set; }
 	}
 
 	public sealed class JsonRpcResponse {
@@ -39,28 +42,85 @@ namespace VDF.CLI.Mcp {
 		public string JsonRpc { get; set; } = "2.0";
 
 		[JsonPropertyName("id")]
-		public object? Id { get; set; }
+		public JsonElement? Id { get; set; }
 
 		[JsonPropertyName("result")]
 		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-		public object? Result { get; set; }
+		public JsonElement? Result { get; set; }
 
 		[JsonPropertyName("error")]
 		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 		public JsonRpcError? Error { get; set; }
 
-		public static JsonRpcResponse Success(object? id, object? result) => new() {
-			Id = id,
-			Result = result
+		public static JsonRpcResponse Success<T>(JsonElement id, T result, JsonTypeInfo<T> typeInfo) => new() {
+			Id = NormalizeId(id),
+			Result = JsonSerializer.SerializeToElement(result, typeInfo)
 		};
 
-		public static JsonRpcResponse CreateError(object? id, int code, string message) => new() {
-			Id = id,
+		public static JsonRpcResponse CreateError(JsonElement id, int code, string message) => new() {
+			Id = NormalizeId(id),
 			Error = new JsonRpcError {
 				Code = code,
 				Message = message
 			}
 		};
+
+		static JsonElement? NormalizeId(JsonElement id) => id.ValueKind == JsonValueKind.Undefined ? null : id;
+	}
+
+	internal sealed class McpInitializeParams {
+		[JsonPropertyName("protocolVersion")]
+		public string? ProtocolVersion { get; set; }
+
+		[JsonPropertyName("capabilities")]
+		public JsonElement Capabilities { get; set; }
+
+		[JsonPropertyName("clientInfo")]
+		public McpClientInfo? ClientInfo { get; set; }
+	}
+
+	internal sealed class McpClientInfo {
+		[JsonPropertyName("name")]
+		public string? Name { get; set; }
+
+		[JsonPropertyName("version")]
+		public string? Version { get; set; }
+	}
+
+	internal sealed class McpInitializeResult {
+		[JsonPropertyName("protocolVersion")]
+		public required string ProtocolVersion { get; init; }
+
+		[JsonPropertyName("capabilities")]
+		public McpServerCapabilities Capabilities { get; set; } = new();
+
+		[JsonPropertyName("serverInfo")]
+		public McpServerInfo ServerInfo { get; set; } = new();
+
+		[JsonPropertyName("instructions")]
+		public required string Instructions { get; init; }
+	}
+
+	internal sealed class McpServerCapabilities {
+		[JsonPropertyName("tools")]
+		public McpToolsCapability Tools { get; set; } = new();
+	}
+
+	internal sealed class McpToolsCapability { }
+
+	internal sealed class McpServerInfo {
+		[JsonPropertyName("name")]
+		public string Name { get; set; } = "vdf-mcp";
+
+		[JsonPropertyName("version")]
+		public string Version { get; set; } = "1.1.0";
+	}
+
+	internal sealed class McpPingResult { }
+
+	internal sealed class McpToolsListResult {
+		[JsonPropertyName("tools")]
+		public required List<McpToolDefinition> Tools { get; init; }
 	}
 
 	public sealed class JsonRpcError {
@@ -72,10 +132,6 @@ namespace VDF.CLI.Mcp {
 	}
 
 	public sealed class McpToolAnnotations {
-		[JsonPropertyName("title")]
-		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-		public string? Title { get; set; }
-
 		[JsonPropertyName("readOnlyHint")]
 		public bool ReadOnlyHint { get; set; }
 
@@ -93,11 +149,15 @@ namespace VDF.CLI.Mcp {
 		[JsonPropertyName("name")]
 		public string Name { get; set; } = string.Empty;
 
+		[JsonPropertyName("title")]
+		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		public string? Title { get; set; }
+
 		[JsonPropertyName("description")]
 		public string Description { get; set; } = string.Empty;
 
 		[JsonPropertyName("inputSchema")]
-		public object InputSchema { get; set; } = new();
+		public JsonElement InputSchema { get; set; }
 
 		[JsonPropertyName("annotations")]
 		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

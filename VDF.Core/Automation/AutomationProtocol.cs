@@ -16,7 +16,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace VDF.Core.Automation {
 
@@ -29,10 +31,12 @@ namespace VDF.Core.Automation {
 		public string Command { get; set; } = string.Empty;
 
 		[JsonPropertyName("parameters")]
-		public Dictionary<string, object?>? Parameters { get; set; }
+		public Dictionary<string, JsonElement>? Parameters { get; set; }
 	}
 
 	internal sealed class AutomationResponse {
+		static readonly JsonElement NullData = JsonElement.Parse("null");
+
 		[JsonPropertyName("success")]
 		public bool Success { get; set; }
 
@@ -40,11 +44,11 @@ namespace VDF.Core.Automation {
 		public string? Error { get; set; }
 
 		[JsonPropertyName("data")]
-		public object? Data { get; set; }
+		public JsonElement Data { get; set; } = NullData;
 
-		public static AutomationResponse Ok(object? data = null) => new() {
+		public static AutomationResponse Ok<T>(T data, JsonTypeInfo<T> typeInfo) => new() {
 			Success = true,
-			Data = data
+			Data = JsonSerializer.SerializeToElement(data, typeInfo)
 		};
 
 		public static AutomationResponse Fail(string error) => new() {
@@ -376,7 +380,70 @@ namespace VDF.Core.Automation {
 		[JsonPropertyName("groupId")]
 		public Guid GroupId { get; set; }
 
+		[JsonPropertyName("truncated")]
+		public bool Truncated { get; set; }
+
 		[JsonPropertyName("items")]
 		public List<GroupThumbnailItemDto> Items { get; set; } = new();
 	}
+
+	internal sealed record ActiveFilterResultDto(
+		[property: JsonPropertyName("activeFilter")] ActiveFilterDto ActiveFilter,
+		[property: JsonPropertyName("totalDuplicates")] int TotalDuplicates,
+		[property: JsonPropertyName("visibleDuplicates")] int VisibleDuplicates,
+		[property: JsonPropertyName("totalGroups")] int TotalGroups,
+		[property: JsonPropertyName("visibleGroups")] int VisibleGroups,
+		[property: JsonPropertyName("checkedCount")] int CheckedCount,
+		[property: JsonPropertyName("visibleCheckedCount")] int VisibleCheckedCount);
+
+	internal sealed record GroupsResultDto(
+		[property: JsonPropertyName("totalCount")] int TotalCount,
+		[property: JsonPropertyName("offset")] int Offset,
+		[property: JsonPropertyName("limit")] int Limit,
+		[property: JsonPropertyName("groups")] List<DuplicateGroupSummaryDto> Groups);
+
+	internal sealed record GroupDetailsResultDto(
+		[property: JsonPropertyName("groupId")] Guid GroupId,
+		[property: JsonPropertyName("count")] int Count,
+		[property: JsonPropertyName("bestItemPath")] string? BestItemPath,
+		[property: JsonPropertyName("bestReason")] string? BestReason,
+		[property: JsonPropertyName("items")] List<DuplicateItemDetailDto> Items);
+
+	internal sealed record HighlightGroupResultDto(
+		[property: JsonPropertyName("highlighted")] bool Highlighted,
+		[property: JsonPropertyName("groupId")] Guid GroupId,
+		[property: JsonPropertyName("message")] string Message);
+
+	internal sealed record MarkNotAMatchResultDto(
+		[property: JsonPropertyName("markedGroupsCount")] int MarkedGroupsCount,
+		[property: JsonPropertyName("groupIds")] List<Guid> GroupIds,
+		[property: JsonPropertyName("message")] string Message);
+
+	internal sealed record RemoveFromListResultDto(
+		[property: JsonPropertyName("removedCount")] int RemovedCount,
+		[property: JsonPropertyName("excludedFromFutureScans")] bool ExcludedFromFutureScans,
+		[property: JsonPropertyName("message")] string Message);
+
+	internal sealed record RenameItemResultDto(
+		[property: JsonPropertyName("oldPath")] string OldPath,
+		[property: JsonPropertyName("newPath")] string NewPath,
+		[property: JsonPropertyName("message")] string Message);
+
+	internal sealed record TransferSuffixConflictDto(
+		[property: JsonPropertyName("groupId")] Guid GroupId,
+		[property: JsonPropertyName("oldPath")] string OldPath,
+		[property: JsonPropertyName("conflictingPath")] string ConflictingPath);
+
+	internal sealed record TransferSuffixRenameDto(
+		[property: JsonPropertyName("groupId")] Guid GroupId,
+		[property: JsonPropertyName("oldPath")] string OldPath,
+		[property: JsonPropertyName("newPath")] string NewPath,
+		[property: JsonPropertyName("suffix")] string Suffix);
+
+	internal sealed record TransferSuffixResultDto(
+		[property: JsonPropertyName("preview")] bool Preview,
+		[property: JsonPropertyName("count")] int Count,
+		[property: JsonPropertyName("skippedConflictsCount")] int SkippedConflictsCount,
+		[property: JsonPropertyName("skippedConflicts")] List<TransferSuffixConflictDto> SkippedConflicts,
+		[property: JsonPropertyName("renames")] List<TransferSuffixRenameDto> Renames);
 }

@@ -30,6 +30,7 @@ namespace VDF.GUI.Data {
 	public enum ThemeMode { System, Light, Dark }
 
 	public class SettingsFile : ReactiveObject {
+		const int CurrentAutomationOptInVersion = 1;
 		static SettingsFile? instance;
 		static string? settingsPath;
 
@@ -251,7 +252,9 @@ namespace VDF.GUI.Data {
 		public bool EnableAutomationServer {
 			get;
 			set => this.RaiseAndSetIfChanged(ref field, value);
-		} = true;
+		}
+		[JsonPropertyName("AutomationOptInVersion")]
+		public int AutomationOptInVersion { get; set; }
 		[JsonPropertyName("AutomationPipeName")]
 		public string AutomationPipeName {
 			get;
@@ -419,7 +422,9 @@ namespace VDF.GUI.Data {
 
 		public static void SaveSettings(string? path = null) {
 			path = ResolveSettingsPath(path);
-			File.WriteAllText(path, JsonSerializer.Serialize(instance, GuiJsonContext.Default.SettingsFile));
+			var settings = Instance;
+			settings.AutomationOptInVersion = Math.Max(settings.AutomationOptInVersion, CurrentAutomationOptInVersion);
+			File.WriteAllText(path, JsonSerializer.Serialize(settings, GuiJsonContext.Default.SettingsFile));
 		}
 
 		[JsonPropertyName("UseMica")]
@@ -715,9 +720,28 @@ namespace VDF.GUI.Data {
 
 			path = ResolveSettingsPath(path);
 			if (!File.Exists(path)) return;
-			instance = JsonSerializer.Deserialize(File.ReadAllBytes(path), GuiJsonContext.Default.SettingsFile)
+			var settings = JsonSerializer.Deserialize(File.ReadAllBytes(path), GuiJsonContext.Default.SettingsFile)
 				?? throw new JsonException($"'{path}' does not contain a settings object.");
-			instance.MigrateLegacyValues();
+			settings.MigrateLegacyValues();
+			if (settings.AutomationOptInVersion < CurrentAutomationOptInVersion) {
+				bool wasEnabled = settings.EnableAutomationServer;
+				// Legacy true may have come from the old default, not an explicit opt-in.
+				settings.EnableAutomationServer = false;
+				settings.AutomationOptInVersion = CurrentAutomationOptInVersion;
+				if (wasEnabled) {
+					// Persist the reset even if the app exits before its next settings save.
+					string fullPath = Path.GetFullPath(path);
+					try {
+						Task.Run(() => AtomicJsonWriter.WriteAsync(fullPath, settings, GuiJsonContext.Default.SettingsFile))
+							.GetAwaiter().GetResult();
+					}
+					catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
+						// The settings are still usable (with automation disabled) if the file is read-only.
+						Logger.Instance.Error($"Could not persist automation opt-in migration: {ex.Message}");
+					}
+				}
+			}
+			instance = settings;
 		}
 
 		/// <summary>

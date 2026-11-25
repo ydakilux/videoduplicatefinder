@@ -27,8 +27,17 @@ using VDF.Core.Automation;
 
 namespace VDF.CLI.Mcp {
 
+	internal sealed class IpcRequestDto {
+		[JsonPropertyName("command")]
+		public required string Command { get; init; }
+
+		[JsonPropertyName("parameters")]
+		public Dictionary<string, JsonElement>? Parameters { get; init; }
+	}
+
 	public sealed class IpcResponseDto {
 		[JsonPropertyName("success")]
+		[JsonRequired]
 		public bool Success { get; set; }
 
 		[JsonPropertyName("error")]
@@ -39,81 +48,103 @@ namespace VDF.CLI.Mcp {
 	}
 
 	public sealed class GuiIpcClient : IDisposable {
+		const int MaxResponseBytes = 64 * 1024 * 1024;
 		readonly string pipeName;
+		readonly int maxResponseBytes;
+		readonly TimeProvider timeProvider;
 		NamedPipeClientStream? clientStream;
-		StreamReader? reader;
+		BoundedLineReader? responseReader;
 		StreamWriter? writer;
 		readonly SemaphoreSlim sendLock = new(1, 1);
 
-		public GuiIpcClient(string pipeName = AutomationConstants.DefaultPipeName) {
+		public GuiIpcClient(string pipeName = AutomationConstants.DefaultPipeName)
+			: this(pipeName, MaxResponseBytes) { }
+
+		internal GuiIpcClient(string pipeName, int maxResponseBytes, TimeProvider? timeProvider = null) {
+			ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxResponseBytes);
 			this.pipeName = string.IsNullOrWhiteSpace(pipeName) ? AutomationConstants.DefaultPipeName : pipeName;
+			this.maxResponseBytes = maxResponseBytes;
+			this.timeProvider = timeProvider ?? TimeProvider.System;
+		}
+
+		static bool IsReadOnly(string command) => command is "get_status" or "get_active_filter" or "get_groups"
+			or "get_duplicate_groups" or "get_group_details" or "get_group_thumbnails" or "audit_selection";
+
+		internal static TimeSpan CommandTimeout(string command, Dictionary<string, JsonElement>? parameters) {
+			if (command == "get_group_thumbnails" && !(parameters != null
+				&& parameters.TryGetValue("load_if_missing", out var load)
+				&& bool.TryParse(load.ToString(), out bool loadIfMissing) && !loadIfMissing)) {
+				return TimeSpan.FromSeconds(120);
+			}
+			return TimeSpan.FromSeconds(command is "set_active_filter" or "scroll_to" or "highlight_group" or "set_checked"
+				or "select_by_criteria" or "audit_selection" or "undo" or "clear_selection" or "invert_selection"
+				or "mark_not_a_match" or "remove_from_list" or "rename_item" or "transfer_suffix_and_rename" ? 60 : 30);
 		}
 
 		public async Task<IpcResponseDto> SendCommandAsync(
 			string command,
-			Dictionary<string, object?>? parameters = null,
+			Dictionary<string, JsonElement>? parameters = null,
 			CancellationToken ct = default) {
 
-			await sendLock.WaitAsync(ct);
+			bool readOnly = IsReadOnly(command);
+			TimeSpan timeout = CommandTimeout(command, parameters);
+			using var deadline = new CancellationTokenSource(timeout, timeProvider);
+			using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
+			var token = linked.Token;
+			bool lockHeld = false;
+			bool writeAttempted = false;
 			try {
-				// If a previously cached pipe broke because VDF.GUI restarted, reconnect transparently once.
-				for (int attempt = 0; attempt < 2; attempt++) {
-					bool reusedExisting = clientStream != null && clientStream.IsConnected;
-					if (!await EnsureConnectedAsync(ct)) {
-						return new IpcResponseDto {
-							Success = false,
-							Error = $"Cannot connect to VDF GUI pipe '{pipeName}'. Please ensure Video Duplicate Finder desktop app is open with Automation enabled in settings."
-						};
-					}
+				await sendLock.WaitAsync(token);
+				lockHeld = true;
+				var json = JsonSerializer.Serialize(new IpcRequestDto {
+					Command = command,
+					Parameters = parameters
+				}, McpJsonContext.Default.IpcRequestDto);
 
-					var payload = new AutomationRequest {
-						Command = command,
-						Parameters = parameters
-					};
+				for (int attempt = 0; ; attempt++) {
+					if (!await EnsureConnectedAsync(token)) {
+						token.ThrowIfCancellationRequested();
+						return Failure($"Cannot connect to VDF GUI pipe '{pipeName}'. Please ensure Video Duplicate Finder desktop app is open with Automation enabled in settings.");
+					}
 
 					try {
-						var json = JsonSerializer.Serialize(payload);
-						await writer!.WriteLineAsync(json.AsMemory(), ct);
-
-						string? responseLine = await reader!.ReadLineAsync(ct);
+						token.ThrowIfCancellationRequested();
+						// Even a failed write may have sent a complete command. Never replay a mutation.
+						writeAttempted = true;
+						await writer!.WriteLineAsync(json.AsMemory(), token);
+						var (responseLine, tooLong) = await responseReader!.ReadLineAsync(token, drainOversize: false, requireTerminator: true);
+						if (tooLong) throw new InvalidDataException($"GUI response exceeds the {maxResponseBytes}-byte line limit.");
 						if (string.IsNullOrWhiteSpace(responseLine)) {
-							ResetConnection();
-							if (reusedExisting && attempt == 0) {
-								continue;
-							}
-							return new IpcResponseDto {
-								Success = false,
-								Error = "GUI closed connection unexpectedly."
-							};
+							throw new IOException("GUI closed connection unexpectedly or returned an empty response.");
 						}
 
-						var response = JsonSerializer.Deserialize<IpcResponseDto>(responseLine);
-						return response ?? new IpcResponseDto {
-							Success = false,
-							Error = "Received null response from GUI."
-						};
+						var response = JsonSerializer.Deserialize(responseLine, McpJsonContext.Default.IpcResponseDto)
+							?? throw new InvalidDataException("Received null response from GUI.");
+						token.ThrowIfCancellationRequested();
+						return response;
 					}
-					catch (IOException) when (reusedExisting && attempt == 0) {
+					catch (IOException) when (readOnly && attempt == 0) {
 						ResetConnection();
+						token.ThrowIfCancellationRequested();
 					}
 				}
-
-				return new IpcResponseDto {
-					Success = false,
-					Error = "Failed to communicate with VDF GUI after reconnect attempt."
-				};
 			}
 			catch (Exception ex) {
-				ResetConnection();
-				return new IpcResponseDto {
-					Success = false,
-					Error = $"IPC communication failure: {ex.Message}"
-				};
+				if (lockHeld) ResetConnection();
+				ct.ThrowIfCancellationRequested();
+				string reason = deadline.IsCancellationRequested
+					? $"GUI command '{command}' timed out after {timeout.TotalSeconds:0} seconds."
+					: $"IPC communication failure: {ex.Message}";
+				return Failure(!readOnly && writeAttempted
+					? $"Outcome unknown: the GUI may have applied '{command}'. Verify its state before retrying. {reason}"
+					: reason);
 			}
 			finally {
-				sendLock.Release();
+				if (lockHeld) sendLock.Release();
 			}
 		}
+
+		static IpcResponseDto Failure(string error) => new() { Success = false, Error = error };
 
 		async Task<bool> EnsureConnectedAsync(CancellationToken ct) {
 			if (clientStream != null && clientStream.IsConnected) {
@@ -128,27 +159,27 @@ namespace VDF.CLI.Mcp {
 					pipeName,
 					PipeDirection.InOut,
 					PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+				clientStream = pipe;
 				using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 				timeoutCts.CancelAfter(2000);
 
 				await pipe.ConnectAsync(timeoutCts.Token);
 
-				clientStream = pipe;
-				reader = new StreamReader(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
+				responseReader = new BoundedLineReader(new Utf8ChunkReader(pipe, strict: true), maxResponseBytes, countUtf8Bytes: true);
 				writer = new StreamWriter(pipe, new UTF8Encoding(false), bufferSize: 4096, leaveOpen: true) { AutoFlush = true };
 				return true;
 			}
-			catch {
+			catch when (!ct.IsCancellationRequested) {
 				ResetConnection();
 				return false;
 			}
 		}
 
 		void ResetConnection() {
-			try { reader?.Dispose(); } catch { }
-			try { writer?.Dispose(); } catch { }
+			// Close the pipe before disposing the writer so it cannot flush buffered data.
 			try { clientStream?.Dispose(); } catch { }
-			reader = null;
+			try { writer?.Dispose(); } catch { }
+			responseReader = null;
 			writer = null;
 			clientStream = null;
 		}
@@ -156,6 +187,88 @@ namespace VDF.CLI.Mcp {
 		public void Dispose() {
 			ResetConnection();
 			sendLock.Dispose();
+		}
+	}
+
+	// Read one stream chunk at a time: StreamReader.ReadAsync may wait to fill its
+	// character buffer even if a complete line has already arrived on the pipe.
+	internal sealed class Utf8ChunkReader(Stream stream, bool strict = false) : TextReader {
+		readonly Decoder decoder = new UTF8Encoding(false, strict).GetDecoder();
+		readonly byte[] bytes = new byte[BoundedLineReader.BufferSize - 3];
+		bool firstChunk = true;
+
+		public override async ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default) {
+			if (buffer.IsEmpty) return 0;
+			ArgumentOutOfRangeException.ThrowIfLessThan(buffer.Length, 4);
+			while (true) {
+				// Leave room for characters from an incomplete UTF-8 sequence carried over by the decoder.
+				int count = await stream.ReadAsync(bytes.AsMemory(0, Math.Min(bytes.Length, buffer.Length - 3)), cancellationToken);
+				int decoded = decoder.GetChars(bytes.AsSpan(0, count), buffer.Span, flush: count == 0);
+				if (firstChunk && decoded != 0) {
+					firstChunk = false;
+					if (buffer.Span[0] == '\uFEFF') {
+						buffer[1..decoded].CopyTo(buffer);
+						decoded--;
+					}
+				}
+				if (decoded != 0 || count == 0) return decoded;
+			}
+		}
+	}
+
+	// Frame lines without asking TextReader.ReadLineAsync to allocate an unbounded string.
+	internal sealed class BoundedLineReader(TextReader source, int limit, bool countUtf8Bytes = false) {
+		internal const int BufferSize = 4096;
+		readonly char[] buffer = new char[BufferSize];
+		int start, end;
+		bool skipLineFeed;
+
+		public async ValueTask<(string? Line, bool TooLong)> ReadLineAsync(
+			CancellationToken ct, bool drainOversize = true, bool requireTerminator = false) {
+			StringBuilder? line = null;
+			int length = 0;
+			bool tooLong = false, endsWithHighSurrogate = false;
+			while (true) {
+				ct.ThrowIfCancellationRequested();
+				if (start == end) {
+					start = 0;
+					end = await source.ReadAsync(buffer.AsMemory(), ct);
+					if (end == 0) {
+						if (requireTerminator && line != null) throw new EndOfStreamException("GUI returned an unterminated response line.");
+						return (line?.ToString(), tooLong);
+					}
+				}
+				if (skipLineFeed) {
+					skipLineFeed = false;
+					if (buffer[start] == '\n' && ++start == end) continue;
+				}
+
+				var available = buffer.AsSpan(start, end - start);
+				int separator = available.IndexOfAny('\r', '\n');
+				var chunk = separator < 0 ? available : available[..separator];
+				if (!tooLong && !chunk.IsEmpty) {
+					int added = chunk.Length;
+					if (countUtf8Bytes) {
+						added = Encoding.UTF8.GetByteCount(chunk);
+						// A pair split across reads costs four bytes, not two three-byte replacements.
+						if (endsWithHighSurrogate && char.IsLowSurrogate(chunk[0])) added -= 2;
+						endsWithHighSurrogate = char.IsHighSurrogate(chunk[^1]);
+					}
+					if (added > limit - length) {
+						if (!drainOversize) return (null, true);
+						tooLong = true;
+						line = null;
+					} else {
+						length += added;
+						(line ??= new StringBuilder()).Append(chunk);
+					}
+				}
+				start += chunk.Length;
+				if (separator >= 0) {
+					skipLineFeed = buffer[start++] == '\r';
+					return (tooLong ? null : line?.ToString() ?? string.Empty, tooLong);
+				}
+			}
 		}
 	}
 }

@@ -361,6 +361,15 @@ namespace VDF.GUI.ViewModels {
 			});
 		}
 
+		internal void UpdateScopedSelection(bool invert, CancellationToken ct) {
+			ct.ThrowIfCancellationRequested();
+			using var undoBatch = BeginSelectionUndoBatch();
+			foreach (var item in ScopedDuplicates()) {
+				ct.ThrowIfCancellationRequested();
+				if (item.IsVisibleInFilter) item.Checked = invert && !item.Checked;
+			}
+		}
+
 		void RecordCheckedChangeForUndo(DuplicateItemVM item) {
 			if (suppressSelectionUndoRecording) return;
 			var entry = (item, !item.Checked); // PropertyChanged fires after the change
@@ -1046,7 +1055,8 @@ namespace VDF.GUI.ViewModels {
 			throw new JsonException("Unknown scan results format");
 		}
 
-		async Task ExportScanResults(string? path = null, bool includeThumbnails = true, int thumbMaxEdge = 160, System.Text.Json.Serialization.Metadata.JsonTypeInfo<ScanResultsEnvelope>? envelopeTypeInfo = null) {
+		async Task ExportScanResults(string? path = null, bool includeThumbnails = true, int thumbMaxEdge = 160,
+			System.Text.Json.Serialization.Metadata.JsonTypeInfo<ScanResultsEnvelope>? envelopeTypeInfo = null, bool showErrorDialog = true) {
 			path ??= await Utils.PickerDialogUtils.SaveFilePicker(new FilePickerSaveOptions() {
 				SuggestedStartLocation = await ApplicationHelpers.MainWindow.StorageProvider.TryGetFolderFromPathAsync(CoreUtils.CurrentFolder),
 				DefaultExtension = includeThumbnails ? ".zip" : ".json",
@@ -1100,6 +1110,7 @@ namespace VDF.GUI.ViewModels {
 				});
 			}
 			catch (Exception ex) {
+				if (!showErrorDialog) throw;
 				string error = string.Format(App.Lang["Message.ExportScanResultsFailed"], ex);
 				Logger.Instance.Error(error);
 				await MessageBoxService.Show(error);
@@ -1875,25 +1886,37 @@ Non-Windows setup:
 		});
 
 		internal async Task MarkGroupAsNotAMatch(Guid gid) {
+			var (_, error) = await TryMarkGroupAsNotAMatchAsync(gid, CancellationToken.None);
+			if (error != null) await MessageBoxService.Show(error);
+		}
+
+		internal async Task<(bool Marked, string? Error)> TryMarkGroupAsNotAMatchAsync(Guid gid, CancellationToken ct) {
+			if (IsScanning || IsBusy) return (false, "Cannot mark a group while the GUI is busy.");
+			var blacklist = new HashSet<string>(PathComparer.ForCurrentPlatform);
+			foreach (var item in Duplicates) {
+				ct.ThrowIfCancellationRequested();
+				if (item.ItemInfo.GroupId == gid) blacklist.Add(item.ItemInfo.Path);
+			}
+			if (blacklist.Count == 0) return (false, null);
+
+			bool persisted = false;
+			IsBusy = true;
 			try {
-				HashSet<string> blacklist = new HashSet<string>(PathComparer.ForCurrentPlatform);
-				foreach (DuplicateItemVM duplicateItem in Duplicates.Where(d => d.ItemInfo.GroupId == gid))
-					blacklist.Add(duplicateItem.ItemInfo.Path);
+				ct.ThrowIfCancellationRequested();
 				GroupBlacklist.Add(blacklist);
 				try {
-					await BlacklistStore.SaveAsync(BlacklistedGroupsFile, GroupBlacklist);
+					await BlacklistStore.SaveAsync(BlacklistedGroupsFile, GroupBlacklist, ct);
+					persisted = true;
 				}
-				catch (Exception e) {
+				catch {
 					GroupBlacklist.Remove(blacklist);
-					await MessageBoxService.Show(e.Message);
-					return;
+					throw;
 				}
 
-				// Remove all items in this group from the list
-				foreach (var path in blacklist.ToList())
-					for (int i = Duplicates.Count - 1; i >= 0; i--)
-						if (Duplicates[i].ItemInfo.GroupId == gid && Duplicates[i].ItemInfo.Path == path)
-							Duplicates.RemoveAt(i);
+				// Persisted already: finish list cleanup even if the caller disconnects.
+				for (int i = Duplicates.Count - 1; i >= 0; i--)
+					if (Duplicates[i].ItemInfo.GroupId == gid && blacklist.Contains(Duplicates[i].ItemInfo.Path))
+						Duplicates.RemoveAt(i);
 
 				// Drop singleton groups
 				DropSingletonGroups();
@@ -1903,10 +1926,18 @@ Non-Windows setup:
 				// Mirror the deletion path: keep backup.scanresults in sync so the mark
 				// survives a crash before the user gets to a clean exit.
 				if (SettingsFile.Instance.BackupAfterListChanged)
-					await ExportScanResults(BackupScanResultsFile);
+					await ExportScanResults(BackupScanResultsFile, showErrorDialog: false);
+				return (true, null);
+			}
+			catch (OperationCanceledException) when (!persisted && ct.IsCancellationRequested) {
+				throw;
 			}
 			catch (Exception ex) {
 				Logger.Instance.Error($"MarkGroupAsNotAMatch failed: {ex}");
+				return (persisted, ex.Message);
+			}
+			finally {
+				IsBusy = false;
 			}
 		}
 
@@ -2017,45 +2048,59 @@ Non-Windows setup:
 			return (keeper, decidedBy?.Name);
 		}
 
-		internal async Task EnsureThumbnailsLoadedAsync(IReadOnlyList<DuplicateItem> items) {
+		internal async Task EnsureThumbnailsLoadedAsync(IReadOnlyList<DuplicateItem> items, CancellationToken ct) {
 			if (items.Count == 0) return;
+			ct.ThrowIfCancellationRequested();
 			SyncCoreSettings();
-			await Scanner.RetrieveThumbnailsForItems(items.ToList());
+			foreach (var item in items) {
+				ct.ThrowIfCancellationRequested();
+				await Scanner.RetrieveThumbnailsForItems([item]);
+			}
 		}
 
-		internal async Task<int> RemoveItemsFromListAsync(IReadOnlyCollection<DuplicateItemVM> itemsToRemove, bool excludeFromFutureScans = false) {
+		internal async Task<int> RemoveItemsFromListAsync(IReadOnlyCollection<DuplicateItemVM> itemsToRemove, bool excludeFromFutureScans = false,
+			CancellationToken ct = default) {
 			if (itemsToRemove.Count == 0 || Duplicates.Count == 0) return 0;
+			if (IsScanning || IsBusy) throw new InvalidOperationException("Cannot remove items while the GUI is busy.");
 
 			var targetSet = new HashSet<DuplicateItemVM>(itemsToRemove, ReferenceEqualityComparer<DuplicateItemVM>.Instance);
 			var paths = targetSet.Select(d => d.ItemInfo.Path).ToList();
 
-			await Task.Run(() => {
-				foreach (var path in paths) {
-					if (excludeFromFutureScans)
-						ScanEngine.BlackListFileEntry(path);
-					else
-						ScanEngine.RemoveFromDatabase(new FileEntry { Path = path });
+			IsBusy = true;
+			try {
+				await Task.Run(() => {
+					// Once the first DB update starts, finish saving and update the GUI list.
+					ct.ThrowIfCancellationRequested();
+					foreach (var path in paths) {
+						if (excludeFromFutureScans)
+							ScanEngine.BlackListFileEntry(path);
+						else
+							ScanEngine.RemoveFromDatabase(new FileEntry { Path = path });
+					}
+					ScanEngine.SaveDatabase();
+				}, ct);
+
+				int removed = 0;
+				for (int i = Duplicates.Count - 1; i >= 0; i--) {
+					if (targetSet.Contains(Duplicates[i])) {
+						Duplicates.RemoveAt(i);
+						removed++;
+					}
 				}
-				ScanEngine.SaveDatabase();
-			});
 
-			int removed = 0;
-			for (int i = Duplicates.Count - 1; i >= 0; i--) {
-				if (targetSet.Contains(Duplicates[i])) {
-					Duplicates.RemoveAt(i);
-					removed++;
+				if (removed > 0) {
+					DropSingletonGroups();
+					RefreshGroupStats();
+					RefreshResultsView();
+					if (SettingsFile.Instance.BackupAfterListChanged)
+						await ExportScanResults(BackupScanResultsFile, showErrorDialog: false);
 				}
-			}
 
-			if (removed > 0) {
-				DropSingletonGroups();
-				RefreshGroupStats();
-				RefreshResultsView();
-				if (SettingsFile.Instance.BackupAfterListChanged)
-					await ExportScanResults(BackupScanResultsFile);
+				return removed;
 			}
-
-			return removed;
+			finally {
+				IsBusy = false;
+			}
 		}
 
 		List<DuplicateItemVM> CheckedItemsToDelete => ScopedDuplicates().Where(d => d.Checked && d.IsVisibleInFilter).ToList();
