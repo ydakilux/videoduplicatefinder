@@ -69,7 +69,7 @@ namespace VDF.GUI.Tests {
 
 		[Fact]
 		public void OlderSettingsWithoutTheNewCriterion_AppendItSwitchedOff() {
-			var savedBeforeThisChange = new List<string> { "Duration", "Resolution", "Bitrate", "FPS", "Bits per pixel", "Audio Bitrate", "Size" };
+			var savedBeforeThisChange = new List<string> { "Duration", "Resolution", "Codec", "Bitrate", "FPS", "Bits per pixel", "Audio Bitrate", "Size" };
 			var names = MainWindowVM.ResolveCriteria(savedBeforeThisChange, DefaultDisabled).Select(c => c.Name).ToList();
 			Assert.Equal(savedBeforeThisChange, names);
 		}

@@ -660,7 +660,7 @@ namespace VDF.GUI.Data {
 		public List<string> QualityCriteriaOrder {
 			get;
 			set => this.RaiseAndSetIfChanged(ref field, value);
-		} = ["Duration", "Resolution", "Bitrate", "FPS", "Bits per pixel", "Audio Bitrate", "Size", "SizeLarger"];
+		} = ["Duration", "Resolution", "Codec", "Bitrate", "FPS", "Bits per pixel", "Audio Bitrate", "Size", "SizeLarger"];
 		/// <summary>
 		/// Criteria the quality ranking ignores (#885). "Size (larger file wins)" starts
 		/// switched off, so nothing changes until someone turns it on (#895).

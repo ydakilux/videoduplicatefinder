@@ -876,5 +876,6 @@
 	"A11y.Row.DiffsToBest": "Verglichen mit dem besten: Dauer {0}, Auflösung {1}, Größe {2}, Bildrate {3}, Bitrate {4}, Audio-Bitrate {5}",
 	"Results.Row.CompareWithBest": "Werte mit dem besten vergleichen",
 	"Settings.Row.Columns.Title": "Spalten der Ergebnisliste",
-	"Settings.Row.Columns.Desc": "Welche Spalten die Ergebnisliste zeigt. Auch per Rechtsklick auf die Spaltenköpfe erreichbar."
+	"Settings.Row.Columns.Desc": "Welche Spalten die Ergebnisliste zeigt. Auch per Rechtsklick auf die Spaltenköpfe erreichbar.",
+	"QualityCriteria.Codec": "Video-Codec"
 }

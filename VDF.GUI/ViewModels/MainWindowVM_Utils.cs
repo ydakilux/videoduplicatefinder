@@ -61,9 +61,23 @@ namespace VDF.GUI.ViewModels {
 			return item.BitRateKbs * 1000m / ((decimal)width * height * (decimal)item.Fps);
 		}
 
+		public static int CodecRank(string? format) {
+			if (string.IsNullOrWhiteSpace(format)) return 0;
+			var f = format.Trim().ToLowerInvariant();
+			if (f.Contains("av1") || f.Contains("av01") || f.Contains("dav1d")) return 50;
+			if (f.Contains("hevc") || f.Contains("h265") || f.Contains("x265")) return 40;
+			if (f.Contains("vp9")) return 30;
+			if (f.Contains("h264") || f.Contains("avc") || f.Contains("x264")) return 20;
+			if (f.Contains("vc1") || f.Contains("vp8")) return 15;
+			if (f.Contains("mpeg4") || f.Contains("xvid") || f.Contains("divx") || f.Contains("msmpeg4")) return 10;
+			if (f.Contains("mpeg2") || f.Contains("mpeg1")) return 5;
+			return 1;
+		}
+
 		internal static readonly Dictionary<string, QualityRanker.Criterion<DuplicateItemVM>> QualityCriteriaMap = new() {
 			["Duration"] = new("Duration", d => d.ItemInfo.Duration, videoOnly: true, nearTie: DurationTies),
 			["Resolution"] = new("Resolution", d => d.ItemInfo.FrameSizeInt, videoOnly: false),
+			["Codec"] = new("Codec", d => CodecRank(d.ItemInfo.Format), videoOnly: true),
 			["Bitrate"] = new("Bitrate", d => d.ItemInfo.BitRateKbs, videoOnly: true, nearTie: BitrateTies),
 			["FPS"] = new("FPS", d => d.ItemInfo.Fps, videoOnly: true, nearTie: FpsTies),
 			["Bits per pixel"] = new("Bits per pixel", d => BitsPerPixel(d.ItemInfo), videoOnly: true, nearTie: BitrateTies),
